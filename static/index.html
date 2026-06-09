@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>法务合同分派智能体</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', sans-serif; background: #f5f5f5; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 { text-align: center; margin-bottom: 30px; color: #333; }
+        .card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .card h2 { margin-bottom: 15px; color: #444; border-bottom: 2px solid #4CAF50; padding-bottom: 10px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: 500; }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;
+        }
+        .form-group textarea { height: 80px; resize: vertical; }
+        button {
+            background: #4CAF50; color: white; border: none; padding: 12px 24px;
+            border-radius: 4px; cursor: pointer; font-size: 14px; width: 100%;
+        }
+        button:hover { background: #45a049; }
+        button.secondary { background: #2196F3; }
+        button.secondary:hover { background: #1976D2; }
+        button.danger { background: #f44336; }
+        button.danger:hover { background: #d32f2f; }
+        .result { background: #e8f5e9; padding: 15px; border-radius: 4px; margin-top: 15px; display: none; }
+        .result.show { display: block; }
+        .result.error { background: #ffebee; }
+        .staff-list, .type-list { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+        .tag { background: #e3f2fd; padding: 8px 12px; border-radius: 20px; font-size: 13px; cursor: pointer; transition: background 0.2s; }
+        .tag:hover { background: #bbdefb; }
+        .staff-card {
+            border: 1px solid #ddd; padding: 15px; border-radius: 8px; flex: 1; min-width: 200px;
+        }
+        .staff-card h4 { margin-bottom: 10px; }
+        .staff-card .stats { font-size: 13px; color: #666; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #f5f5f5; font-weight: 600; }
+        .loading { display: none; color: #666; }
+        .loading.show { display: block; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>法务合同分派智能体</h1>
+
+        <div class="grid">
+            <!-- 合同分派 -->
+            <div class="card">
+                <h2>合同分派</h2>
+                <div class="tabs" style="display: flex; gap: 10px; margin-bottom: 20px;">
+                    <button class="secondary" id="tabManual" onclick="switchTab('manual')" style="flex: 1;">手动输入</button>
+                    <button id="tabUpload" onclick="switchTab('upload')" style="flex: 1; background: #666;">上传文件</button>
+                </div>
+
+                <!-- 手动输入 -->
+                <div id="manualForm">
+                    <div class="form-group">
+                        <label>合同页数</label>
+                        <input type="number" id="pages" placeholder="例如: 10">
+                    </div>
+                    <div class="form-group">
+                        <label>合同字数</label>
+                        <input type="number" id="wordCount" placeholder="例如: 5000">
+                    </div>
+                    <div class="form-group">
+                        <label>合同类型</label>
+                        <select id="contractType">
+                            <option value="">选择类型（或留空让AI识别）</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>额外信息</label>
+                        <textarea id="extraInfo" placeholder="补充说明，如：涉及跨境条款"></textarea>
+                    </div>
+                    <button onclick="assignContract()">智能分派</button>
+                </div>
+
+                <!-- 上传文件 -->
+                <div id="uploadForm" style="display: none;">
+                    <div class="form-group">
+                        <label>上传合同文件 (PDF/Word)</label>
+                        <input type="file" id="contractFile" accept=".pdf,.docx,.doc" style="padding: 10px;">
+                    </div>
+                    <div class="form-group">
+                        <label>额外信息</label>
+                        <textarea id="uploadExtraInfo" placeholder="补充说明，如：涉及跨境条款"></textarea>
+                    </div>
+                    <button onclick="assignByFile()">上传并分派</button>
+                </div>
+
+                <div class="loading" id="loading">正在分析...</div>
+                <div class="result" id="assignResult"></div>
+            </div>
+
+            <!-- 人员管理 -->
+            <div class="card">
+                <h2>法务人员</h2>
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <input type="text" id="newStaffName" placeholder="姓名" style="flex: 1;">
+                    <button class="secondary" onclick="addStaff()" style="width: auto; padding: 10px 20px;">添加人员</button>
+                </div>
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <button class="secondary" onclick="loadStaff()" style="flex: 1;">刷新列表</button>
+                    <button class="danger" onclick="resetWorkload()" style="flex: 1;">清空任务量</button>
+                </div>
+                <div id="staffList" class="staff-list"></div>
+            </div>
+        </div>
+
+        <div class="grid">
+            <!-- 合同类型 -->
+            <div class="card">
+                <h2>合同类型管理</h2>
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <input type="text" id="newTypeName" placeholder="新类型名称" style="flex: 1;">
+                    <input type="text" id="newTypeDesc" placeholder="描述" style="flex: 2;">
+                    <button class="secondary" onclick="addType()" style="width: auto; padding: 10px 20px;">添加</button>
+                </div>
+                <div id="typeList" class="type-list"></div>
+            </div>
+
+            <!-- 分派历史 -->
+            <div class="card">
+                <h2>分派历史</h2>
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <button class="secondary" onclick="loadHistory()" style="flex: 1;">刷新记录</button>
+                    <button class="danger" onclick="clearHistory()" style="flex: 1;">清空历史</button>
+                </div>
+                <div style="max-height: 300px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px;">
+                    <table>
+                        <thead style="position: sticky; top: 0; background: #f5f5f5; z-index: 1;">
+                            <tr><th>时间</th><th>类型</th><th>推荐人员</th><th>置信度</th></tr>
+                        </thead>
+                        <tbody id="historyTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        let contractTypes = []; // 全局存储合同类型
+
+        // 页面加载时初始化
+        window.onload = function() {
+            loadTypes().then(() => loadStaff());
+            loadHistory();
+        };
+
+        // 切换选项卡
+        function switchTab(tab) {
+            const manualForm = document.getElementById('manualForm');
+            const uploadForm = document.getElementById('uploadForm');
+            const tabManual = document.getElementById('tabManual');
+            const tabUpload = document.getElementById('tabUpload');
+
+            if (tab === 'manual') {
+                manualForm.style.display = 'block';
+                uploadForm.style.display = 'none';
+                tabManual.style.background = '#2196F3';
+                tabUpload.style.background = '#666';
+            } else {
+                manualForm.style.display = 'none';
+                uploadForm.style.display = 'block';
+                tabManual.style.background = '#666';
+                tabUpload.style.background = '#2196F3';
+            }
+        }
+
+        // 合同分派
+        async function assignContract() {
+            const loading = document.getElementById('loading');
+            const result = document.getElementById('assignResult');
+            loading.classList.add('show');
+            result.classList.remove('show', 'error');
+
+            const data = {
+                pages: parseInt(document.getElementById('pages').value) || null,
+                word_count: parseInt(document.getElementById('wordCount').value) || null,
+                contract_type: document.getElementById('contractType').value || null,
+                extra_info: document.getElementById('extraInfo').value || null
+            };
+
+            try {
+                const response = await fetch(`${API_BASE}/assign`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                const res = await response.json();
+
+                if (response.ok) {
+                    result.innerHTML = `
+                        <h3>分派结果</h3>
+                        <p><strong>推荐人员:</strong> ${res.recommended_staff}</p>
+                        <p><strong>合同类型:</strong> ${res.contract_type}</p>
+                        <p><strong>置信度:</strong> ${(res.confidence * 100).toFixed(0)}%</p>
+                        <p><strong>分派理由:</strong> ${res.reason}</p>
+                    `;
+                    result.classList.add('show');
+                    loadStaff();
+                    loadHistory();
+                } else {
+                    result.innerHTML = `<p>错误: ${res.error || res.detail}</p>`;
+                    result.classList.add('show', 'error');
+                }
+            } catch (e) {
+                result.innerHTML = `<p>请求失败: ${e.message}</p>`;
+                result.classList.add('show', 'error');
+            }
+            loading.classList.remove('show');
+        }
+
+        // 文件上传分派
+        async function assignByFile() {
+            const loading = document.getElementById('loading');
+            const result = document.getElementById('assignResult');
+            loading.classList.add('show');
+            result.classList.remove('show', 'error');
+
+            const fileInput = document.getElementById('contractFile');
+            if (!fileInput.files[0]) {
+                result.innerHTML = '<p>请选择文件</p>';
+                result.classList.add('show', 'error');
+                loading.classList.remove('show');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('extra_info', document.getElementById('uploadExtraInfo').value || '');
+
+            try {
+                const response = await fetch(`${API_BASE}/assign/upload`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const res = await response.json();
+
+                if (response.ok) {
+                    let parseInfo = '';
+                    if (res.parse_info) {
+                        parseInfo = `
+                            <h3 style="margin-top: 15px;">文件解析结果</h3>
+                            <p><strong>文件名:</strong> ${res.parse_info.filename}</p>
+                            <p><strong>页数:</strong> ${res.parse_info.pages}</p>
+                            <p><strong>字数:</strong> ${res.parse_info.word_count}</p>
+                            <p><strong>内容预览:</strong></p>
+                            <div style="background: #f5f5f5; padding: 10px; border-radius: 4px; max-height: 200px; overflow-y: auto; font-size: 13px; white-space: pre-wrap;">${res.parse_info.text_preview}</div>
+                        `;
+                    }
+
+                    result.innerHTML = `
+                        <h3>分派结果</h3>
+                        <p><strong>文件:</strong> ${fileInput.files[0].name}</p>
+                        <p><strong>推荐人员:</strong> ${res.recommended_staff}</p>
+                        <p><strong>合同类型:</strong> ${res.contract_type}</p>
+                        <p><strong>置信度:</strong> ${(res.confidence * 100).toFixed(0)}%</p>
+                        <p><strong>分派理由:</strong> ${res.reason}</p>
+                        ${parseInfo}
+                    `;
+                    result.classList.add('show');
+                    fileInput.value = '';
+                    loadStaff();
+                    loadHistory();
+                } else {
+                    result.innerHTML = `<p>错误: ${res.error || res.detail}</p>`;
+                    result.classList.add('show', 'error');
+                }
+            } catch (e) {
+                result.innerHTML = `<p>请求失败: ${e.message}</p>`;
+                result.classList.add('show', 'error');
+            }
+            loading.classList.remove('show');
+        }
+
+        // 加载人员列表
+        async function loadStaff() {
+            try {
+                const response = await fetch(`${API_BASE}/staff`);
+                const staff = await response.json();
+                const container = document.getElementById('staffList');
+                container.innerHTML = staff.map(s => `
+                    <div class="staff-card">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <h4 style="margin: 0;">${s.name}</h4>
+                            <button class="danger" onclick="deleteStaff(${s.id})" style="width: auto; padding: 5px 10px; font-size: 12px;">删除</button>
+                        </div>
+                        <div class="stats">
+                            <p>待办: ${s.current_todo_count} | 本周: ${s.weekly_assigned} | 本月: ${s.monthly_assigned}</p>
+                        </div>
+                        <div style="margin-top: 10px;">
+                            <div style="display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px;">
+                                ${s.skill_tags.map(skill => `
+                                    <span class="tag" style="cursor: pointer;" onclick="removeSkill(${s.id}, '${skill}')" title="点击删除">
+                                        ${skill} ×
+                                    </span>
+                                `).join('')}
+                            </div>
+                            <div style="display: flex; gap: 5px;">
+                                <select id="skill_${s.id}" style="flex: 1; padding: 5px; font-size: 12px;">
+                                    <option value="">选择技能</option>
+                                    ${contractTypes.filter(t => !s.skill_tags.includes(t.name)).map(t =>
+                                        `<option value="${t.name}">${t.name}</option>`
+                                    ).join('')}
+                                </select>
+                                <button class="secondary" onclick="addSkill(${s.id})" style="width: auto; padding: 5px 10px; font-size: 12px;">+</button>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                console.error('加载人员失败:', e);
+            }
+        }
+
+        // 加载合同类型
+        async function loadTypes() {
+            try {
+                const response = await fetch(`${API_BASE}/types`);
+                contractTypes = await response.json();
+                const container = document.getElementById('typeList');
+                const select = document.getElementById('contractType');
+
+                container.innerHTML = contractTypes.map(t => `
+                    <span class="tag">${t.name}</span>
+                `).join('');
+
+                // 更新下拉框（保留第一个空选项）
+                select.innerHTML = '<option value="">选择类型（或留空让AI识别）</option>';
+                contractTypes.forEach(t => {
+                    select.innerHTML += `<option value="${t.name}">${t.name}</option>`;
+                });
+            } catch (e) {
+                console.error('加载类型失败:', e);
+            }
+        }
+
+        // 添加合同类型
+        async function addType() {
+            const name = document.getElementById('newTypeName').value;
+            const desc = document.getElementById('newTypeDesc').value;
+            if (!name) { alert('请输入类型名称'); return; }
+
+            try {
+                const response = await fetch(`${API_BASE}/types`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, description: desc })
+                });
+                if (response.ok) {
+                    document.getElementById('newTypeName').value = '';
+                    document.getElementById('newTypeDesc').value = '';
+                    loadTypes();
+                } else {
+                    const res = await response.json();
+                    alert(res.detail || '添加失败');
+                }
+            } catch (e) {
+                alert('请求失败: ' + e.message);
+            }
+        }
+
+        // 加载历史记录
+        async function loadHistory() {
+            try {
+                const response = await fetch(`${API_BASE}/history`);
+                const history = await response.json();
+                const tbody = document.getElementById('historyTable');
+                tbody.innerHTML = history.map(h => `
+                    <tr>
+                        <td>${new Date(h.created_at).toLocaleString()}</td>
+                        <td>${h.contract_type}</td>
+                        <td>${h.staff_name}</td>
+                        <td>${(h.confidence * 100).toFixed(0)}%</td>
+                    </tr>
+                `).join('');
+            } catch (e) {
+                console.error('加载历史失败:', e);
+            }
+        }
+
+        // 清空任务量
+        async function resetWorkload() {
+            if (!confirm('确定要清空所有人员的任务量吗？')) return;
+            try {
+                const response = await fetch(`${API_BASE}/staff/reset-workload`, { method: 'POST' });
+                const res = await response.json();
+                if (response.ok) {
+                    alert(res.message);
+                    loadStaff();
+                } else {
+                    alert('操作失败: ' + (res.detail || res.error));
+                }
+            } catch (e) {
+                alert('请求失败: ' + e.message);
+            }
+        }
+
+        // 添加人员
+        async function addStaff() {
+            const name = document.getElementById('newStaffName').value.trim();
+            if (!name) { alert('请输入姓名'); return; }
+
+            try {
+                const response = await fetch(`${API_BASE}/staff`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: name, skill_tags: [] })
+                });
+                if (response.ok) {
+                    document.getElementById('newStaffName').value = '';
+                    loadStaff();
+                } else {
+                    const res = await response.json();
+                    alert(res.detail || '添加失败');
+                }
+            } catch (e) {
+                alert('请求失败: ' + e.message);
+            }
+        }
+
+        // 删除人员
+        async function deleteStaff(staffId) {
+            if (!confirm('确定要删除该人员吗？')) return;
+            try {
+                const response = await fetch(`${API_BASE}/staff/${staffId}`, { method: 'DELETE' });
+                if (response.ok) {
+                    loadStaff();
+                } else {
+                    const res = await response.json();
+                    alert(res.detail || '删除失败');
+                }
+            } catch (e) {
+                alert('请求失败: ' + e.message);
+            }
+        }
+
+        // 添加技能
+        async function addSkill(staffId) {
+            const select = document.getElementById(`skill_${staffId}`);
+            const skill = select.value;
+            if (!skill) { alert('请选择技能'); return; }
+
+            try {
+                const response = await fetch(`${API_BASE}/staff/${staffId}/skills`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ skill: skill })
+                });
+                if (response.ok) {
+                    loadStaff();
+                } else {
+                    const res = await response.json();
+                    alert(res.detail || '添加失败');
+                }
+            } catch (e) {
+                alert('请求失败: ' + e.message);
+            }
+        }
+
+        // 删除技能
+        async function removeSkill(staffId, skill) {
+            if (!confirm(`确定要删除技能"${skill}"吗？`)) return;
+            try {
+                const response = await fetch(`${API_BASE}/staff/${staffId}/skills/${encodeURIComponent(skill)}`, {
+                    method: 'DELETE'
+                });
+                if (response.ok) {
+                    loadStaff();
+                } else {
+                    const res = await response.json();
+                    alert(res.detail || '删除失败');
+                }
+            } catch (e) {
+                alert('请求失败: ' + e.message);
+            }
+        }
+
+        // 清空历史
+        async function clearHistory() {
+            if (!confirm('确定要清空所有分派历史吗？')) return;
+            try {
+                const response = await fetch(`${API_BASE}/history/clear`, { method: 'DELETE' });
+                const res = await response.json();
+                if (response.ok) {
+                    alert(res.message);
+                    loadHistory();
+                } else {
+                    alert('操作失败: ' + (res.detail || res.error));
+                }
+            } catch (e) {
+                alert('请求失败: ' + e.message);
+            }
+        }
+    </script>
+</body>
+</html>
